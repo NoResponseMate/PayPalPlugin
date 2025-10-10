@@ -104,14 +104,6 @@ jobs:
                     postgresql password: "postgres"
 
             -
-                name: Run Chrome Headless
-                run: google-chrome-stable --enable-automation --disable-background-networking --no-default-browser-check --no-first-run --disable-popup-blocking --disable-default-apps --allow-insecure-localhost --disable-translate --disable-extensions --no-sandbox --enable-features=Metal --headless --remote-debugging-port=9222 --window-size=2880,1800 --proxy-server='direct://' --proxy-bypass-list='*' http://127.0.0.1 > /dev/null 2>&1 &
-
-            -
-                name: Run webserver
-                run: (cd tests/Application && symfony server:start --port=8080 --dir=public --daemon)
-
-            -
                 name: Get Composer cache directory
                 id: composer-cache
                 run: echo "dir=$(composer config cache-files-dir)" >> $GITHUB_OUTPUT
@@ -146,37 +138,37 @@ jobs:
             -   name: Run security checks
                 run: |
                     set -e
-                    
-                    composer audit --no-interaction --format=json > composer-audit.json || AUDIT_EXIT=$?
-                    
+
                     IGNORED=$(jq -r '.config.audit.ignore[]?' composer.json | sort || true)
-                    
-                    if [ "${AUDIT_EXIT:-0}" -ne 0 ]; then
-                      FOUND=$(jq -r '
-                        # Collect CVEs from both advisories and ignored-advisories
-                        (.advisories[]?.advisories[]?.cve? // empty),
-                        (.["ignored-advisories"][]?[]?.cve? // empty)
-                      ' composer-audit.json | sort | uniq)
-                    
-                      DIFF=$(comm -23 <(echo "$FOUND") <(echo "$IGNORED"))
-                    
-                      if [ -n "$DIFF" ]; then
-                        echo "❌ New vulnerabilities found by Composer audit:"
-                        echo "$DIFF"
-                        exit 1
-                      else
-                        echo "✅ No new vulnerabilities found by Composer audit."
-                      fi
+
+                    if [ -n "$IGNORED" ]; then
+                        echo "Ignored CVEs:"
+                        echo "$IGNORED"
+                        echo
+                    fi
+
+                    composer audit --no-interaction --format=json > composer-audit.json || true
+
+                    REPORTED=$(jq -r '
+                        (.advisories? // [] | .[]? | .cve? // empty),
+                        (.["ignored-advisories"]? // {} | to_entries[] | select(.value != null) | .value[] | .cve? // empty)
+                    ' composer-audit.json | sort | uniq)
+
+                    DIFF=$(comm -23 <(echo "$REPORTED") <(echo "$IGNORED"))
+
+                    if [ -n "$DIFF" ]; then
+                      echo "❌ New vulnerabilities found by Composer audit:"
+                      echo "$DIFF"
+                      exit 1
                     else
                       echo "✅ No new vulnerabilities found by Composer audit."
                     fi
-                    
+
                     symfony security:check --format=json > symfony-audit.json || true
-                    
+
                     FOUND=$(jq -r '.[]?.advisories[]?.cve? // empty' symfony-audit.json | sort | uniq)
-                    
                     DIFF=$(comm -23 <(echo "$FOUND") <(echo "$IGNORED"))
-                    
+
                     if [ -n "$DIFF" ]; then
                       echo "❌ New vulnerabilities found by Symfony security:check:"
                       echo "$DIFF"
@@ -257,6 +249,14 @@ jobs:
             -
                 name: Run PHPUnit
                 run: vendor/bin/phpunit --colors=always
+
+            -
+                name: Run Chrome Headless
+                run: google-chrome-stable --enable-automation --disable-background-networking --no-default-browser-check --no-first-run --disable-popup-blocking --disable-default-apps --allow-insecure-localhost --disable-translate --disable-extensions --no-sandbox --enable-features=Metal --headless --remote-debugging-port=9222 --window-size=2880,1800 --proxy-server='direct://' --proxy-bypass-list='*' http://127.0.0.1 > /dev/null 2>&1 &
+
+            -
+                name: Run webserver
+                run: (cd tests/Application && symfony server:start --port=8080 --dir=public --daemon)
 
             -
                 name: Run Behat
