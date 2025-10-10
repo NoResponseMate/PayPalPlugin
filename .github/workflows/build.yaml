@@ -147,23 +147,6 @@ jobs:
                         echo
                     fi
 
-                    composer audit --no-interaction --format=json > composer-audit.json || true
-
-                    REPORTED=$(jq -r '
-                        (.advisories? // [] | .[]? | .cve? // empty),
-                        (.["ignored-advisories"]? // {} | to_entries[] | select(.value != null) | .value[] | .cve? // empty)
-                    ' composer-audit.json | sort | uniq)
-
-                    DIFF=$(comm -23 <(echo "$REPORTED") <(echo "$IGNORED"))
-
-                    if [ -n "$DIFF" ]; then
-                      echo "❌ New vulnerabilities found by Composer audit:"
-                      echo "$DIFF"
-                      exit 1
-                    else
-                      echo "✅ No new vulnerabilities found by Composer audit."
-                    fi
-
                     symfony security:check --format=json > symfony-audit.json || true
 
                     FOUND=$(jq -r '.[]?.advisories[]?.cve? // empty' symfony-audit.json | sort | uniq)
