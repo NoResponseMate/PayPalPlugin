@@ -143,6 +143,68 @@ jobs:
                 name: Install PHP dependencies
                 run: composer install --no-interaction
 
+            -   name: Run security checks
+                run: |
+                    set -e
+                    
+                    composer audit --no-interaction --format=json > composer-audit.json || AUDIT_EXIT=$?
+                    
+                    IGNORED=$(jq -r '.config.audit.ignore[]?' composer.json | sort || true)
+                    
+                    if [ "${AUDIT_EXIT:-0}" -ne 0 ]; then
+                      FOUND=$(jq -r '
+                        # Collect CVEs from both advisories and ignored-advisories
+                        (.advisories[]?.advisories[]?.cve? // empty),
+                        (.["ignored-advisories"][]?[]?.cve? // empty)
+                      ' composer-audit.json | sort | uniq)
+                    
+                      DIFF=$(comm -23 <(echo "$FOUND") <(echo "$IGNORED"))
+                    
+                      if [ -n "$DIFF" ]; then
+                        echo "❌ New vulnerabilities found by Composer audit:"
+                        echo "$DIFF"
+                        exit 1
+                      else
+                        echo "✅ No new vulnerabilities found by Composer audit."
+                      fi
+                    else
+                      echo "✅ No new vulnerabilities found by Composer audit."
+                    fi
+                    
+                    symfony security:check --format=json > symfony-audit.json || true
+                    
+                    FOUND=$(jq -r '.[]?.advisories[]?.cve? // empty' symfony-audit.json | sort | uniq)
+                    
+                    DIFF=$(comm -23 <(echo "$FOUND") <(echo "$IGNORED"))
+                    
+                    if [ -n "$DIFF" ]; then
+                      echo "❌ New vulnerabilities found by Symfony security:check:"
+                      echo "$DIFF"
+                      exit 1
+                    else
+                      echo "✅ No new vulnerabilities found by Symfony security:check."
+                    fi
+
+            -
+                name: Run ECS
+                run: vendor/bin/ecs check
+
+            -
+                name: Validate composer.json
+                run: composer validate --ansi --strict
+
+            -
+                name: Run analysis
+                run: composer analyse
+
+            -
+                name: Run PHPStan
+                run: vendor/bin/phpstan analyse -c phpstan.neon.dist src/
+
+            -
+                name: Run PHPSpec
+                run: vendor/bin/phpspec run --ansi -f progress --no-interaction
+
             -
                 name: Get Yarn cache directory
                 id: yarn-cache
@@ -191,42 +253,6 @@ jobs:
             -
                 name: Load fixtures in test application
                 run: (cd tests/Application && bin/console sylius:fixtures:load -n)
-
-            -   name: Run security checks
-                run: |
-                    set -e
-                    composer audit --no-interaction
-                    
-                    symfony security:check --format=json > security.json || true
-                    jq --argjson ignore "$(jq '.config.audit.ignore' composer.json)" '
-                      .vulnerabilities
-                      | map(select(.cve | IN($ignore[]) | not))
-                      | if length > 0 then
-                          (error("New vulnerabilities found: " + (map(.cve) | join(", "))))
-                        else
-                          empty
-                        end
-                    ' security.json
-
-            -
-                name: Run ECS
-                run: vendor/bin/ecs check
-
-            -
-                name: Validate composer.json
-                run: composer validate --ansi --strict
-
-            -
-                name: Run analysis
-                run: composer analyse
-
-            -
-                name: Run PHPStan
-                run: vendor/bin/phpstan analyse -c phpstan.neon.dist src/
-
-            -
-                name: Run PHPSpec
-                run: vendor/bin/phpspec run --ansi -f progress --no-interaction
 
             -
                 name: Run PHPUnit
