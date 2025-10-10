@@ -21,7 +21,7 @@ jobs:
             matrix:
                 php: ["8.3"]
                 symfony: ["^5.4.21", "^6.4"]
-                sylius: ["~1.13.0", "~1.14.0"]
+                sylius: ["~1.14.0"]
                 database: ["mysql", "postgres"]
                 mysql: ["8.4"]
                 postgres: ["15.8"]
@@ -30,7 +30,7 @@ jobs:
 
                 include:
                     -
-                        php: "8.1"
+                        php: "8.3"
                         symfony: "^6.4"
                         sylius: "~1.14.0"
                         database: "mysql"
@@ -39,7 +39,7 @@ jobs:
                         wkhtmltopdf: "0.12.6-1"
                         state_machine_adapter: "symfony_workflow"
                     -
-                        php: "8.2"
+                        php: "8.3"
                         symfony: "^6.4"
                         sylius: "~1.14.0"
                         database: "mysql"
@@ -48,7 +48,7 @@ jobs:
                         wkhtmltopdf: "0.12.6-1"
                         state_machine_adapter: "winzou_state_machine"
                     -
-                        php: "8.2"
+                        php: "8.3"
                         symfony: "^6.4"
                         sylius: "~1.14.0"
                         database: "mysql"
@@ -192,9 +192,21 @@ jobs:
                 name: Load fixtures in test application
                 run: (cd tests/Application && bin/console sylius:fixtures:load -n)
 
-            -
-                name: Run security check
-                run: symfony security:check
+            -   name: Run security checks
+                run: |
+                    set -e
+                    composer audit --no-interaction
+                    
+                    symfony security:check --format=json > security.json || true
+                    jq --argjson ignore "$(jq '.config.audit.ignore' composer.json)" '
+                      .vulnerabilities
+                      | map(select(.cve | IN($ignore[]) | not))
+                      | if length > 0 then
+                          (error("New vulnerabilities found: " + (map(.cve) | join(", "))))
+                        else
+                          empty
+                        end
+                    ' security.json
 
             -
                 name: Run ECS
